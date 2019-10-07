@@ -11,21 +11,18 @@
 |
  */
 
-Route::get('/', function () {
-    return view('welcome');
-});
+Route::get('/', '\App\Http\Controllers\Auth\LoginController@showLoginForm');
 
 Auth::routes();
 
 Route::get('/home', 'HomeController@index')->name('home');
+Route::get('/callback', '\App\Http\Controllers\Auth\LoginController@fbCallback')->name('fb.callback');
+Route::get('/bitly/callback', 'HomeController@bitlyCallback')->name('bitly.callback');
 
-Route::get('/redirect', 'SocialAuthFacebookController@redirect');
-Route::get('/callback', 'SocialAuthFacebookController@callback');
+Route::match(['get', 'post'], 'post/step1', 'PostController@step1')->name('step1');
+Route::match(['get', 'post'], 'post/step2', 'PostController@step2')->name('step2');
+Route::match(['get', 'post'], 'post/step3', 'PostController@step3')->name('step3');
+Route::delete('/folder/upload', 'PostController@clearUploadFolder')->name('folder.upload.clear');
 
-Route::get('/posts/create-step1', 'PostController@createStep1');
-Route::post('/posts/create-step1', 'PostController@postCreateStep1');
-Route::get('/posts/create-step2', 'PostController@createStep2');
-Route::post('/posts/create-step2', 'PostController@postCreateStep2');
-Route::post('/posts/remove-image', 'PostController@removeImage');
-Route::get('/posts/create-step3', 'PostController@createStep3');
-Route::post('/getPageAccessToken', 'PostController@getPageAccessToken');
+Route::get('/report/download/{id}', 'FbReportController@download')->name('report.download');
+Route::delete('/report/remove/{id}', 'FbReportController@remove')->name('report.remove');

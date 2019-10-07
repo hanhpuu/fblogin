@@ -15,8 +15,14 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register()
     {
-        $this->app->singleton(Facebook::class, function ($app) {
-            return new Facebook(config('facebook.config'));
+        $fb = new Facebook([
+            'app_id' => env('FACEBOOK_APP_ID'),
+            'app_secret' => env('FACEBOOK_APP_SECRET'),
+            'default_graph_version' => 'v2.10',
+        ]);
+
+        $this->app->singleton(Facebook::class, function ($app) use ($fb) {
+            return $fb;
         });
     }
 

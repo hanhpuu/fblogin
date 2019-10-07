@@ -2,171 +2,133 @@
 
 namespace App\Http\Controllers;
 
-use App\Post;
-use Facebook\Exceptions\FacebookSDKException;
+use App\Services\Bitly;
 use Illuminate\Http\Request;
 use Excel;
 use App\Imports\CsvImport;
-use Socialite;
-use app\Http\Controllers\app\Http\Controllers\SocialAuthFacebookController;
-use Facebook\Facebook;
+use App\Exports\CsvExport;
+use App\Services\FacebookPageService;
+use App\Services\File;
+use Illuminate\Support\Facades\Storage;
 
 class PostController extends Controller
 {
 
     /**
      * Show the step 1 Form for creating a new post.
-     *
+     * @param $request Request object
      * @return \Illuminate\Http\Response
      */
-    public function createStep1(Request $request)
+    public function step1(Request $request)
     {
-        $post = $request->session()->get('post');
-        return view('posts.create-step1', compact('post', $post));
+        if ($request->isMethod('get')) {
+            $post = $request->session()->get('post');
+            return view('posts.step1', compact('post', $post));
+        } else if ($request->isMethod('post')){
+            $request->session()->put('content', $request->input('content'));
+            return redirect()->route('step2');
+        }
+
     }
 
     /**
-     * Post Request to store step1 info in session
-     *
-     * @param \Illuminate\Http\Request $request
+     * Show the Post Review page
+     * @param $request Request object
      * @return \Illuminate\Http\Response
      */
-    public function postCreateStep1(Request $request)
+    public function step2(Request $request)
     {
-        $validatedData = $request->validate([
-            'content' => 'required',
-        ]);
-        if (empty($request->session()->get('post'))) {
-            $post = new Post();
-            $post->fill($validatedData);
-            $request->session()->put('post', $post);
-        } else {
-            $post = $request->session()->get('post');
-            $post->fill($validatedData);
-            $request->session()->put('post', $post);
+        $pages = $request->session()->get('fbPages');
+
+        if(!$pages) {
+            return redirect()->route('step1')->with('error', 'Can not get fan page list, please try logout and login again');
         }
 
-        return redirect('/posts/create-step2');
+        if ($request->isMethod('get')) {
+            return view('posts.step2')->with('pages', $pages);
+        } else if ($request->isMethod('post')){
+            $pageId  = $request->input('page_id');
+            $page = FacebookPageService::findPageById($pages, $pageId);
+            if($page !== false) {
+                $request->session()->put('page', $page);
+                return redirect()->route('step3');
+            } else {
+                // force to choose one page to post to
+                return view('posts.step2')->with('pages', $pages);
+            }
+        }
     }
 
     /**
      * Show the step 2 Form for creating a new post.
-     *
+     * @param $request Request object
      * @return \Illuminate\Http\Response
      */
-    public function createStep2(Request $request)
+    public function step3(Request $request)
     {
-        $post = $request->session()->get('post');
-        return view('posts.create-step2', compact('post', $post));
-    }
 
-    /**
-     * Post Request to store step1 info in session
-     *
-     * @param \Illuminate\Http\Request $request
-     * @return \Illuminate\Http\Response
-     */
-    public function postCreateStep2(Request $request)
-    {
-        if (!isset($_POST["btnZip"])) {
-            die;
-        }
+        if ($request->isMethod('get')) {
+            return view('posts.step3');
+        } else if ($request->isMethod('post')){
+            set_time_limit(0);
+            try {
 
-        if ($_FILES['zipFile']['name'] != '') {
-            $file_name = $_FILES['zipFile']['name'];
-
-            $array = explode(".", $file_name);
-            $name = $array[0];
-            $ext = $array[1];
-            if ($ext == 'zip') {
-                $path = 'upload/';
-                if (!is_dir($path)) {
-                    mkdir($path);
+                // user didn't choose zip file
+                if(!File::ifFileIsZip($request->file('file'))) {
+                    throw new \Exception('Uploaded file is not zip file');
                 }
 
-                $location = $path . $file_name;
-                if (move_uploaded_file($_FILES['zipFile']['tmp_name'], $location)) {
-                    $zip = new \ZipArchive;
-                    if ($zip->open($location)) {
-                        $zip->extractTo($path);
-                        $zip->close();
-                    }
+                // copy file to storage
+                $directory = time();
+                $directoryPath = 'upload/' . $directory;
+                Storage::makeDirectory($directoryPath);
+                $request->file('file')->storeAs($directoryPath, 'file.zip');
 
-                    $arr = explode("-", $path . $name);
-                    $files = scandir($arr[0]);
-                    $csvOrderNumber = array_search("Link.csv", $files);
+                // extract file
+                $path = storage_path('app/' . $directoryPath);
+                File::unzipFile($path . '/file.zip', $path);
 
-                    foreach ($files as $file) {
-//                        unlink($arr[0] . '/' . $file);
-                    }
-//                    unlink($location);
-//                    rmdir($path . $name);
+                // read csv file
+                $rows = Excel::toArray(new CsvImport, $path . '/Link.xlsx');
+                $dataWithPosts = FacebookPageService::postToPage($request->session()->get('page'), $request->session()->get('content'), $rows[0], $directoryPath);
+
+                $fbPostIds = [];
+                foreach ($dataWithPosts as $row) {
+                    $fbPostIds[] = $row[2];
+                }
+                $shortenIds = Bitly::getShortenLinkByFbIds($fbPostIds, $request->session()->get('bitlyToken'));
+                $finalData = File::matchShortenLinksToData($shortenIds, $dataWithPosts);
+
+
+                File::storeResultDataToFileCache($finalData, 'fbReports');
+
+                // remove upload directory
+                try {
+                    Storage::deleteDirectory($directoryPath);
+                } catch(\Exception $e) {
 
                 }
+
+                return Excel::download(new CsvExport($finalData), 'Result.xlsx');
+
+
+            } catch(\Exception $e) {
+                dd($e->getMessage());
+                return redirect()->route('step3')->with('error', $e->getMessage());
+
             }
+
         }
 
-
-        // save csv file
-        $csvFileName = "fileName-" . time() . '.csv';
-        $request->postimg->storeAs('file', $csvFileName);
-        $post = $request->session()->get('post');
-        $post->csv = $fileName;
-        // save it to session
-        $request->session()->put('post', $post);
-
-        $handle = fopen($_FILES["postimg"]["tmp_name"], 'r');
-        $rows = Excel::toArray(new CsvImport, $request->file('postimg'));
-        foreach ($rows[0] as $value) {
-            if ($value[0] == 'URL') {
-                continue;
-            }
-            $arr = explode('/', $value[0]);
-            $photo = end($arr);
-        }
-        return redirect('/posts/create-step3');
     }
 
-    /**
-     * Show the Post Review page
-     *
-     * @return \Illuminate\Http\Response
-     */
-    public function removeImage(Request $request)
-    {
-        $post = $request->session()->get('post');
-        $post->postImg = null;
-        return view('posts.create-step2', compact('post', $post));
-    }
-
-    /**
-     * Show the Post Review page
-     *
-     * @return \Illuminate\Http\Response
-     */
-    public function createStep3(Request $request)
-    {
-        $adminPages = session('adminPages');
-        return view('posts.create-step3')->with('adminPages', $adminPages);;
-    }
-
-    public function getPageAccessToken()
-    {
-
-        $page_id = $_POST['page_access_id'];
-        $fb = new Facebook([
-            'app_id' => env('FACEBOOK_APP_ID'),
-            'app_secret' => env('FACEBOOK_APP_SECRET'),
-            'default_graph_version' => 'v2.10',
-        ]);
+    public function clearUploadFolder() {
+        // remove upload directory
         try {
-            $client = new \GuzzleHttp\Client();
-            $url = 'https://graph.facebook.com/' . $page_id . '/feed?message=456&from=' . $_POST['page_name'] . '&access_token=' . $_POST['page_access_token'];
-            $res = $client->request('POST', $url);
-            $body = $res->getBody();
-            echo $body;
-        } catch (FacebookSDKException $e) {
-            dd($e); // handle exception
+            Storage::deleteDirectory('upload');
+        } catch(\Exception $e) {
+            dd($e->getMessage());
         }
+        return redirect()->route('home');
     }
 }

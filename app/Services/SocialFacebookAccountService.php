@@ -3,6 +3,8 @@ namespace App\Services;
 use App\SocialFacebookAccount;
 use App\User;
 use Laravel\Socialite\Contracts\User as ProviderUser;
+use Facebook\Facebook;
+
 class SocialFacebookAccountService
 {
     public function createOrGetUser(ProviderUser $providerUser)
@@ -32,11 +34,7 @@ class SocialFacebookAccountService
     }
 
     public static function getEmail($token) {
-        $fb = new \Facebook\Facebook([
-            'app_id' => env('FACEBOOK_APP_ID'),
-            'app_secret' => env('FACEBOOK_APP_SECRET'),
-            'default_graph_version' => 'v2.10',
-        ]);
+        $fb = app(Facebook::class);
 
         try {
             // Get the \Facebook\GraphNodes\GraphUser object for the current user.
@@ -57,11 +55,7 @@ class SocialFacebookAccountService
     }
 
     public static function getFanPages($token) {
-        $fb = new \Facebook\Facebook([
-            'app_id' => env('FACEBOOK_APP_ID'),
-            'app_secret' => env('FACEBOOK_APP_SECRET'),
-            'default_graph_version' => 'v2.10',
-        ]);
+        $fb = app(Facebook::class);
 
         try {
             // Get the \Facebook\GraphNodes\GraphUser object for the current user.
