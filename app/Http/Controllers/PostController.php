@@ -4,7 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Services\Bitly;
 use Illuminate\Http\Request;
-use Excel;
+use Maatwebsite\Excel\Facades\Excel;
 use App\Imports\CsvImport;
 use App\Exports\CsvExport;
 use App\Services\FacebookPageService;
@@ -82,7 +82,7 @@ class PostController extends Controller
 
                 // read csv file
                 $path = storage_path('app/' . $directoryPath);
-                $rows = Excel::toArray(new CsvImport, $path . '/Link.xlxs');
+                $rows = Excel::toArray(new CsvImport, $path . '/Link.csv');
 
                 $shortenLinks = Bitly::getShortenLinkByFbIds($rows[0], $request->session()->get('bitlyToken'));
                 $dataWithPosts = FacebookPageService::postToPage($request->session()->get('page'), $request->session()->get('content'), $rows[0], $shortenLinks, $directoryPath);
@@ -97,7 +97,7 @@ class PostController extends Controller
 
                 }
 
-                return Excel::download(new CsvExport($finalData), 'Result.xlsx');
+                return Excel::download(new CsvExport($finalData), 'Result.csv');
 
             } catch (\Exception $e) {
                 dd($e->getMessage());
