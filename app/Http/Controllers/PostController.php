@@ -24,7 +24,7 @@ class PostController extends Controller
         if ($request->isMethod('get')) {
             $post = $request->session()->get('post');
             return view('posts.step1', compact('post', $post));
-        } else if ($request->isMethod('post')){
+        } else if ($request->isMethod('post')) {
             $request->session()->put('content', $request->input('content'));
             return redirect()->route('step2');
         }
@@ -40,16 +40,16 @@ class PostController extends Controller
     {
         $pages = $request->session()->get('fbPages');
 
-        if(!$pages) {
+        if (!$pages) {
             return redirect()->route('step1')->with('error', 'Can not get fan page list, please try logout and login again');
         }
 
         if ($request->isMethod('get')) {
             return view('posts.step2')->with('pages', $pages);
-        } else if ($request->isMethod('post')){
-            $pageId  = $request->input('page_id');
+        } else if ($request->isMethod('post')) {
+            $pageId = $request->input('page_id');
             $page = FacebookPageService::findPageById($pages, $pageId);
-            if($page !== false) {
+            if ($page !== false) {
                 $request->session()->put('page', $page);
                 return redirect()->route('step3');
             } else {
@@ -69,64 +69,49 @@ class PostController extends Controller
 
         if ($request->isMethod('get')) {
             return view('posts.step3');
-        } else if ($request->isMethod('post')){
+        } else if ($request->isMethod('post')) {
             set_time_limit(0);
             try {
-
-                // user didn't choose zip file
-                if(!File::ifFileIsZip($request->file('file'))) {
-                    throw new \Exception('Uploaded file is not zip file');
-                }
-
                 // copy file to storage
                 $directory = time();
                 $directoryPath = 'upload/' . $directory;
                 Storage::makeDirectory($directoryPath);
-                $request->file('file')->storeAs($directoryPath, 'file.zip');
-
-                // extract file
-                $path = storage_path('app/' . $directoryPath);
-                File::unzipFile($path . '/file.zip', $path);
+                foreach ($request->file('file') as $file) {
+                    $file->storeAs($directoryPath, $file->getClientOriginalName());
+                }
 
                 // read csv file
-                $rows = Excel::toArray(new CsvImport, $path . '/Link.xlsx');
-                $dataWithPosts = FacebookPageService::postToPage($request->session()->get('page'), $request->session()->get('content'), $rows[0], $directoryPath);
+                $path = storage_path('app/' . $directoryPath);
+                $rows = Excel::toArray(new CsvImport, $path . '/Link.xlxs');
 
-                $fbPostIds = [];
-                foreach ($dataWithPosts as $row) {
-                    $fbPostIds[] = $row[2];
-                }
-                $shortenIds = Bitly::getShortenLinkByFbIds($fbPostIds, $request->session()->get('bitlyToken'));
-                $finalData = File::matchShortenLinksToData($shortenIds, $dataWithPosts);
+                $shortenLinks = Bitly::getShortenLinkByFbIds($rows[0], $request->session()->get('bitlyToken'));
+                $dataWithPosts = FacebookPageService::postToPage($request->session()->get('page'), $request->session()->get('content'), $rows[0], $shortenLinks, $directoryPath);
+                $finalData = File::matchShortenLinksToData($rows[0], $dataWithPosts);
 
-
-                File::storeResultDataToFileCache($finalData, 'fbReports');
+                File::storeResultDataToFileCache($dataWithPosts, 'fbReports');
 
                 // remove upload directory
                 try {
                     Storage::deleteDirectory($directoryPath);
-                } catch(\Exception $e) {
+                } catch (\Exception $e) {
 
                 }
 
                 return Excel::download(new CsvExport($finalData), 'Result.xlsx');
 
-
-            } catch(\Exception $e) {
+            } catch (\Exception $e) {
                 dd($e->getMessage());
                 return redirect()->route('step3')->with('error', $e->getMessage());
-
             }
-
         }
-
     }
 
-    public function clearUploadFolder() {
+    public function clearUploadFolder()
+    {
         // remove upload directory
         try {
             Storage::deleteDirectory('upload');
-        } catch(\Exception $e) {
+        } catch (\Exception $e) {
             dd($e->getMessage());
         }
         return redirect()->route('home');
